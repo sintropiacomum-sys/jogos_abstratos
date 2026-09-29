@@ -91,6 +91,10 @@ def captures(move: Move, board: Board) -> int:
             r2, c2 = move.row + step_r * 2, move.col + step_c * 2
             r3, c3 = move.row + step_r * 3, move.col + step_c * 3
 
+            if not in_bounds(r3, c3):
+
+                continue
+
             if (board.matrix[r1][c1] is OPPONENT[move.agent] and
                 board.matrix[r2][c2] is OPPONENT[move.agent] and
                 board.matrix[r3][c3] is move.agent):
@@ -105,21 +109,21 @@ def check_alignment(move: Move, board: Board) -> bool:
 
     for dr, dc in DIRECTIONS:
 
-        for multiplier in (1, -1):
+        count = 1
 
-            count = 1
+        for multiplier in (1, -1):
 
             r, c = move.row + dr * multiplier, move.col + dc * multiplier
 
             while in_bounds(r, c) and board.matrix[r][c] is move.agent:
 
                 count += 1
-                r += dr
-                c += dc
+                r += dr * multiplier
+                c += dc * multiplier
 
-            if count >= WINNING_LINE:
+        if count >= WINNING_LINE:
 
-                return True
+            return True
 
     return False
 

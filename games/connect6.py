@@ -78,21 +78,21 @@ def check_alignment(move: Move, board: Board) -> bool:
 
     for dr, dc in DIRECTIONS:
 
-        for multiplier in (1, -1):
+        count = 1
 
-            count = 1
+        for multiplier in (1, -1):
 
             r, c = move.row + dr * multiplier, move.col + dc * multiplier
 
             while in_bounds(r, c) and board.matrix[r][c] is move.agent:
 
                 count += 1
-                r += dr
-                c += dc
+                r += dr * multiplier
+                c += dc * multiplier
 
-            if count >= WINNING_LINE:
+        if count >= WINNING_LINE:
 
-                return True
+            return True
 
     return False
 
