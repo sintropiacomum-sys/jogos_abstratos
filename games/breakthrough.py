@@ -1,4 +1,5 @@
 import re
+import time
 from enum import Enum, auto
 from typing import NamedTuple
 from collections.abc import Iterator
@@ -89,7 +90,7 @@ class Move(NamedTuple):
     result: MoveType
 
 @dataclass
-class GameState:
+class GameState():
 
     board: Board
     agent: Sides
@@ -192,11 +193,15 @@ def parse_move(state: GameState, text: str):
 
     if not (in_bounds(origin) and in_bounds(destination)):
         
-        raise BoardError(f"Jogada inválida, tanto a origem quanto o destino precisam estar dentro do tabuleiro.")
+        raise BoardError("Jogada inválida, tanto a origem quanto o destino precisam estar dentro do tabuleiro.")
 
     if state.board.matrix[r_origin][c_origin] is None:
                 
-        raise RuleError(f"Jogada inválida, a casa de origem está vazia.")
+        raise RuleError("Jogada inválida, a casa de origem está vazia.")
+
+    if state.board.matrix[r_origin][c_origin] is not state.agent:
+
+        raise RuleError("Jogada inválida, a peça selecionada pertence ao adversário.")
 
     valid_directions = MOVEMENTS[state.agent]
     direction = (r_destination - r_origin, c_destination - c_origin)
@@ -236,3 +241,36 @@ def format_board(board: Board) -> str:
 def print_board(board: Board):
 
     print(format_board(board))
+
+def play_breakthrough():
+
+    state = GameState(Board.build_initial_board(), Sides.WHITE)
+
+    while True:
+
+        print(CLEAR, end="")
+        print_board(state.board)
+        print()
+
+        winner = get_winner(state.board)
+
+        if winner is not None:
+
+            print(f"Estado terminal alcançado! Vencedor: {PLAYERS[winner]}")
+
+            break
+
+        try:
+
+            play = ask_input(state.agent)
+            move = parse_move(state, play)
+            state = apply_move(state, move)
+
+        except BreakthroughError as e:
+
+            print(e)
+            time.sleep(2)
+
+if __name__ == "__main__":
+
+    play_breakthrough()      

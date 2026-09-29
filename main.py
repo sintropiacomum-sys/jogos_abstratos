@@ -1,5 +1,5 @@
 import time
-import connect6, pente, othello, pentago, pentwiste
+from games import connect6, pente, othello, pentago, pentwiste, breakthrough
 
 CLEAR = "\033[H\033[J"
 
@@ -15,7 +15,8 @@ if __name__ == "__main__":
         \n2. Pente
         \n3. Othello
         \n4. Pentago
-        \n5. Pentwiste""")
+        \n5. Pentwiste
+        \n6. Breakthrough""")
         print()
 
         try:
@@ -41,6 +42,10 @@ if __name__ == "__main__":
             if choice == 5:
                         
                 pentwiste.play_pentwiste()
+
+            if choice == 6:
+                                    
+                breakthrough.play_breakthrough()
 
             else:
 
