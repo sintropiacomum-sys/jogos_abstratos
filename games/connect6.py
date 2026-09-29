@@ -5,7 +5,7 @@ from enum import Enum, auto
 from typing import NamedTuple
 
 CLEAR = "\033[H\033[J"
-SIZE = 19
+BOARD_SIZE = 19
 WINNING_LINE = 6
 DIRECTIONS = ((1, 1), (0, 1), (1, 0), (-1, 1))
 
@@ -24,7 +24,7 @@ OPPONTENT = {Sides.BLACK: Sides.WHITE, Sides.WHITE: Sides.BLACK}
 
 def in_bounds(row, col) -> bool:
 
-    return 0 <= row < SIZE and 0 <= col < SIZE
+    return 0 <= row < BOARD_SIZE and 0 <= col < BOARD_SIZE
 
 @dataclass
 class Board:
@@ -34,7 +34,7 @@ class Board:
     @classmethod
     def build_initial_board(cls) -> "Board":
 
-        initial_board: list[list[Sides | None]] = [[None for _ in range(SIZE)] for _ in range(SIZE)]
+        initial_board: list[list[Sides | None]] = [[None for _ in range(BOARD_SIZE)] for _ in range(BOARD_SIZE)]
         
         return cls(initial_board)
 
@@ -50,7 +50,7 @@ def parse_input(board: Board, text: str):
     
     if match is None:
     
-        raise Connect6Error("Input de jogada irreconhecível, tente [A-R][1-18].")
+        raise Connect6Error("Input de jogada irreconhecível, tente [A-S][1-19].")
     
     row, col = int(match.group(2)) - 1, ord(match.group(1).upper()) - ord('A')
 
@@ -66,7 +66,7 @@ def parse_input(board: Board, text: str):
 
 def ask_input(agent: Sides):
 
-    jogada = str(input(f"{PLAYERS[agent]} jogam, insira [A-R][1-18]: "))
+    jogada = str(input(f"{PLAYERS[agent]} jogam, insira [A-S][1-19]: "))
 
     return jogada
 
@@ -96,13 +96,17 @@ def check_alignment(move: Move, board: Board) -> bool:
 
     return False
 
+def full_board(number_plays: int) -> bool:
+
+    return number_plays >= 361
+
 def render_row(row) -> str:
     
     return " ".join(GLYPHS[col] for col in row)
 
 def format_board(board: Board) -> str:
 
-    header = "   " + " ".join(chr(ord("A") + col) for col in range(SIZE))
+    header = "   " + " ".join(chr(ord("A") + col) for col in range(BOARD_SIZE))
     
     lines = [header]
 
@@ -122,6 +126,7 @@ def play_connect6():
 
     agent = Sides.BLACK
     board = Board.build_initial_board()
+    plays = 0
 
     while True:
 
@@ -135,6 +140,7 @@ def play_connect6():
             row, col = parse_input(board, play)
             move = Move(row, col, agent)
             apply_move(move, board)
+            plays += 1
 
         except Connect6Error as e:
 
@@ -151,6 +157,13 @@ def play_connect6():
             print(f"O vencedor é o lado das {PLAYERS[agent]}.")
 
             break
+
+        if full_board(plays):
+
+            print(CLEAR, end="")
+            print_board(board)
+            print()
+            print(f"Tabuleiro cheio sem produzir vencedor. O resultado é um empate.")
 
         agent = OPPONTENT[agent]
 

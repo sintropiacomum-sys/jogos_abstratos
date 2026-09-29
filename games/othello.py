@@ -287,6 +287,8 @@ def play_othello():
                 print()
                 print(f"O resultado é um empate.")
 
+                break
+
         else:
 
             print(CLEAR, end="")

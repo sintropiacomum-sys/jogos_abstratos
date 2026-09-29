@@ -227,13 +227,17 @@ def check_win(captured_pairs: int, agent: Sides, board: Board) -> bool:
 
     return has_alignment(agent, board) or captured_pairs >= 4
 
+def full_board(board: Board) -> bool:
+
+    return all(cell is not None for row in board.matrix for cell in row)
+
 def parse_input(board: Board, text: str) -> tuple[Coord, Coord, Orientation]:
     
     match = re.fullmatch(r'\s*([A-Za-z])\s*(\d)\s*([A-Za-z])\s*(\d)\s*([A-Za-z])\s*([A-Za-z])\s*', text)
     
     if match is None:
     
-        raise ParseError("Input irreconhecível, tente (posição) + (quadrante) + (sentido horário ou anti-horário): [a-f][1-6] [A-B][1-2] [SH]/[AH].")
+        raise ParseError("Input irreconhecível, tente (posição) + (quadrante) + (sentido horário ou anti-horário): [a-g][1-8] [A-B][1-2] [SH]/[AH].")
     
     placement = int(match.group(2)) - 1, ord(match.group(1).lower()) - ord('a')
     r, c = placement
@@ -408,7 +412,7 @@ def play_pentwiste():
 
             break
 
-        elif all(cell is not None for row in board.matrix for cell in row):
+        elif full_board(board):
 
             print(CLEAR, end="")
             print_board(board)
@@ -416,7 +420,7 @@ def play_pentwiste():
             print(f"Score das {PLAYERS[Sides.BLACK]}: {scores[Sides.BLACK]}")
             print(f"Score das {PLAYERS[Sides.WHITE]}: {scores[Sides.WHITE]}")
             print()
-            print(f"O board foi preenchido e rotacionado sem produzir vencedor. O resultado é um empate.")
+            print(f"O tabuleiro foi preenchido e rotacionado sem produzir vencedor. O resultado é um empate.")
 
             time.sleep(3)
 

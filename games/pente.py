@@ -131,6 +131,10 @@ def check_win(captured_pairs: int, move: Move, board: Board) -> bool:
 
     return check_alignment(move, board) or captured_pairs >= 5
 
+def full_board(board: Board) -> bool:
+
+    return all(cell is not None for row in board.matrix for cell in row)
+
 def render_row(row) -> str:
 
     return " ".join(GLYPHS[col] for col in row)
@@ -194,6 +198,13 @@ def play_pente():
             print(f"O vencedor é o lado das {PLAYERS[agent]}.")
 
             break
+
+        if full_board(board):
+
+            print(CLEAR, end="")
+            print_board(board)
+            print()
+            print(f"Tabuleiro cheio sem produzir vencedor. O resultado é um empate.")
 
         agent = OPPONENT[agent]
 
