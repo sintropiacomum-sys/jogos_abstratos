@@ -1,26 +1,30 @@
 from dataclasses import dataclass
 import re
-import time
-from enum import Enum, auto
+from enum import Enum
 from typing import NamedTuple
+from collections.abc import Iterator
+from two_player_game import TwoPlayerGame, GameError, play_in_terminal
 
-CLEAR = "\033[H\033[J"
 BOARD_SIZE = 19
 WINNING_LINE = 6
 DIRECTIONS = ((1, 1), (0, 1), (1, 0), (-1, 1))
+Coord = tuple[int, int]
 
-class Connect6Error(Exception):
-    
-    ...
+class Connect6Error(GameError): ...
+
+class ParseError(Connect6Error): ...
+
+class BoardError(Connect6Error): ...
+
+class RuleError(Connect6Error): ...
 
 class Sides(Enum):
 
-    BLACK = auto()
-    WHITE = auto()
+    BLACK = "Pretas"
+    WHITE = "Brancas"
 
 GLYPHS = {Sides.BLACK: "◯", Sides.WHITE: "●", None: "·"}
-PLAYERS = {Sides.BLACK: "Pretas", Sides.WHITE: "Brancas"}
-OPPONTENT = {Sides.BLACK: Sides.WHITE, Sides.WHITE: Sides.BLACK}
+OPPONENT = {Sides.BLACK: Sides.WHITE, Sides.WHITE: Sides.BLACK}
 
 def in_bounds(row, col) -> bool:
 
@@ -31,6 +35,23 @@ class Board:
 
     matrix: list[list[None | Sides]]
 
+    def get_at(self, coord: Coord) -> Sides | None:
+        
+        r, c = coord
+    
+        return self.matrix[r][c]
+        
+    def set_at(self, coord: Coord, cell: Sides):
+    
+        r, c = coord
+        self.matrix[r][c] = cell
+
+    def copy(self) -> "Board":
+    
+        new_matrix = [row.copy() for row in self.matrix]
+
+        return Board(new_matrix)
+
     @classmethod
     def build_initial_board(cls) -> "Board":
 
@@ -38,43 +59,56 @@ class Board:
         
         return cls(initial_board)
 
+@dataclass
+class GameState:
+
+    board: Board
+    agent: Sides
+    plays: int
+    winner: Sides | None
+
 class Move (NamedTuple):
 
-    row: int
-    col: int
+    coord: Coord
     agent: Sides
 
-def parse_input(board: Board, text: str):
+def generate_legal_moves(state: GameState) -> Iterator[Move]:
+
+    for r in range(BOARD_SIZE):
+
+        for c in range(BOARD_SIZE):
+
+            if state.board.get_at((r, c)) is None:
+
+                yield Move((r, c), state.agent)
+
+def parse_input(state: GameState, text: str) -> Move:
     
     match = re.fullmatch(r'\s*([A-Za-z])\s*(\d{1,2})\s*', text)
     
     if match is None:
     
-        raise Connect6Error("Input de jogada irreconhecível, tente [A-S][1-19].")
+        raise ParseError("Input de jogada irreconhecível, tente [a-s][1-19].")
     
     row, col = int(match.group(2)) - 1, ord(match.group(1).upper()) - ord('A')
 
     if not in_bounds(row, col):
     
-        raise Connect6Error("Jogada fora das coordenadas do tabuleiro.")
+        raise BoardError("Jogada fora das coordenadas do tabuleiro.")
         
-    if board.matrix[row][col] is not None:
+    if state.board.get_at((row, col)) is not None:
 
-        raise Connect6Error("Posição já ocupada.")
+        raise RuleError("Posição já ocupada.")
     
-    return row, col
+    return Move((row, col), state.agent)
 
-def ask_input(agent: Sides):
+def place_stone(board: Board, move: Move):
 
-    jogada = str(input(f"{PLAYERS[agent]} jogam, insira [A-S][1-19]: "))
-
-    return jogada
-
-def apply_move(move: Move, board: Board):
-
-    board.matrix[move.row][move.col] = move.agent
+    board.set_at(move.coord, move.agent)
 
 def check_alignment(move: Move, board: Board) -> bool:
+
+    row, col = move.coord
 
     for dr, dc in DIRECTIONS:
 
@@ -82,7 +116,7 @@ def check_alignment(move: Move, board: Board) -> bool:
 
         for multiplier in (1, -1):
 
-            r, c = move.row + dr * multiplier, move.col + dc * multiplier
+            r, c = row + dr * multiplier, col + dc * multiplier
 
             while in_bounds(r, c) and board.matrix[r][c] is move.agent:
 
@@ -96,9 +130,28 @@ def check_alignment(move: Move, board: Board) -> bool:
 
     return False
 
-def full_board(number_plays: int) -> bool:
+def full_board(plays: int) -> bool:
 
-    return number_plays >= 361
+    return plays >= (BOARD_SIZE ** 2)
+
+def apply_move(state: GameState, move: Move):
+
+    winner = None
+    new_board = state.board.copy()
+    agent = state.agent
+    place_stone(new_board, move)
+    plays = state.plays
+    plays += 1
+    
+    if check_alignment(move, new_board):
+
+        winner = move.agent
+
+    elif plays % 2 == 1:
+
+        agent = OPPONENT[agent]
+
+    return GameState(new_board, agent, plays, winner)
 
 def render_row(row) -> str:
     
@@ -106,7 +159,7 @@ def render_row(row) -> str:
 
 def format_board(board: Board) -> str:
 
-    header = "   " + " ".join(chr(ord("A") + col) for col in range(BOARD_SIZE))
+    header = "   " + " ".join(chr(ord("a") + col) for col in range(BOARD_SIZE))
     
     lines = [header]
 
@@ -118,55 +171,39 @@ def format_board(board: Board) -> str:
 
     return "\n".join(lines)
 
-def print_board(board: Board):
+class Connect6(TwoPlayerGame[GameState, Move]):
 
-    print(format_board(board))
+    name = "Connect6"
+    move_format = "[a-s][1-19]"
 
-def play_connect6():
+    def initial_state(self) -> GameState:
 
-    agent = Sides.BLACK
-    board = Board.build_initial_board()
-    plays = 0
+        return GameState(Board.build_initial_board(), Sides.BLACK, 0, None)
 
-    while True:
+    def legal_moves(self, state: GameState) -> Iterator[Move]:
 
-        print(CLEAR, end="")
-        print_board(board)
-        print()
+        return generate_legal_moves(state)
 
-        try:
+    def parse_move(self, state: GameState, text: str) -> Move:
 
-            play = ask_input(agent)
-            row, col = parse_input(board, play)
-            move = Move(row, col, agent)
-            apply_move(move, board)
-            plays += 1
+        return parse_input(state, text)    
 
-        except Connect6Error as e:
+    def apply_move(self, state: GameState, move: Move) -> GameState:
 
-            print(e)
-            time.sleep(3)
+        return apply_move(state, move)
 
-            continue
+    def is_terminal(self, state: GameState) -> bool:
 
-        if check_alignment(move, board):
+        return state.winner is not None or full_board(state.plays)
 
-            print(CLEAR, end="")
-            print_board(board)
-            print()
-            print(f"O vencedor é o lado das {PLAYERS[agent]}.")
+    def winner(self, state: GameState) -> Sides | None:
 
-            break
+        return state.winner
 
-        if full_board(plays):
+    def to_text(self, state: GameState) -> str:
 
-            print(CLEAR, end="")
-            print_board(board)
-            print()
-            print(f"Tabuleiro cheio sem produzir vencedor. O resultado é um empate.")
-
-        agent = OPPONTENT[agent]
+        return format_board(state.board)
 
 if __name__ == "__main__":
 
-    play_connect6()
+    play_in_terminal(Connect6())

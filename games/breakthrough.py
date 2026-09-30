@@ -4,6 +4,7 @@ from enum import Enum, auto
 from typing import NamedTuple
 from collections.abc import Iterator
 from dataclasses import dataclass
+from two_player_game import TwoPlayerGame
 
 CLEAR = "\033[H\033[J"
 BOARD_SIZE = 8
@@ -270,6 +271,10 @@ def play_breakthrough():
 
             print(e)
             time.sleep(2)
+
+class Breakthrough(TwoPlayerGame):
+
+    ...
 
 if __name__ == "__main__":
 

@@ -119,6 +119,7 @@ def legal_moves(origin: Coord, state: GameState) -> list[Move]:
 
     test_board = state.board.copy()
     r_origin, c_origin = origin
+    test_board.matrix[r_origin][c_origin] = None
     legal_moves = []
 
     for step in DIRECTIONS:
@@ -126,7 +127,6 @@ def legal_moves(origin: Coord, state: GameState) -> list[Move]:
         for r_destination, c_destination in ray(test_board, origin, step):
 
             test_board.matrix[r_destination][c_destination] = state.agent
-            test_board.matrix[r_origin][c_origin] = None
 
             for step in DIRECTIONS:
 
