@@ -1,85 +1,133 @@
-from dataclasses import dataclass
 import re
-import time
-import random
-from enum import Enum, auto
+from enum import Enum
 from typing import NamedTuple
+from collections.abc import Iterator
+from dataclasses import dataclass
+from two_player_game import TwoPlayerGame, GameError, play_in_terminal
 
-CLEAR = "\033[H\033[J"
-SIZE = 18
+BOARD_SIZE = 19
 WINNING_LINE = 5
-CAPTURE_SPAN = 4
 DIRECTIONS = ((1, 1), (0, 1), (1, 0), (-1, 1))
+Coord = tuple[int, int]
+SQUARE_VALUES = (7, 8, 9, 10, 11)
+SQUARE = frozenset((r, c) for r in SQUARE_VALUES for c in SQUARE_VALUES)
 
-class PenteError(Exception):
-    
-    ...
+class PenteError(GameError): ...
+
+class ParseError(PenteError): ...
+
+class BoardError(PenteError): ...
+
+class RuleError(PenteError): ...
 
 class Sides(Enum):
 
-    BLACK = auto()
-    WHITE = auto()
+    BLACK = "Pretas"
+    WHITE = "Brancas"
 
 SIDES = [Sides.BLACK, Sides.WHITE]
 GLYPHS = {Sides.BLACK: "◯", Sides.WHITE: "●", None: "·"}
-PLAYERS = {Sides.BLACK: "Pretas", Sides.WHITE: "Brancas"}
 OPPONENT = {Sides.BLACK: Sides.WHITE, Sides.WHITE: Sides.BLACK}
-
-def in_bounds(row, col) -> bool:
-
-    return 0 <= row < SIZE and 0 <= col < SIZE
 
 @dataclass
 class Board:
 
     matrix: list[list[None | Sides]]
 
+    def get_at(self, coord: Coord) -> Sides | None:
+            
+        r, c = coord
+    
+        return self.matrix[r][c]
+        
+    def set_at(self, coord: Coord, cell: Sides | None):
+    
+        r, c = coord
+        self.matrix[r][c] = cell
+
+    def copy(self) -> "Board":
+    
+        new_matrix = [row.copy() for row in self.matrix]
+
+        return Board(new_matrix)
+
     @classmethod
     def build_initial_board(cls) -> "Board":
 
-        initial_board: list[list[Sides | None]] = [[None for _ in range(SIZE)] for _ in range(SIZE)]
+        initial_board: list[list[Sides | None]] = [[None for _ in range(BOARD_SIZE)] for _ in range(BOARD_SIZE)]
+        initial_board[BOARD_SIZE // 2][BOARD_SIZE // 2] = Sides.WHITE
         
         return cls(initial_board)
 
+def in_bounds(coord: Coord) -> bool:
+
+    row, col = coord
+
+    return 0 <= row < BOARD_SIZE and 0 <= col < BOARD_SIZE
+
+@dataclass
+class GameState:
+
+    board: Board
+    agent: Sides
+    scores: dict[Sides, int]
+    winner: Sides | None
+    plays: int
+    
+
 class Move (NamedTuple):
 
-    row: int
-    col: int
+    coord: Coord
     agent: Sides
 
-def parse_input(board: Board, text: str):
+def opening_rule(plays: int, coord: Coord) -> bool:
+
+    return plays == 2 and coord in SQUARE
+
+def generate_legal_moves(state: GameState) -> Iterator[Move]:
+
+    for r in range(BOARD_SIZE):
+
+        for c in range(BOARD_SIZE):
+
+            if state.board.get_at((r, c)) is None:
+
+                if not opening_rule(state.plays, (r, c)):
+
+                    yield Move((r, c), state.agent)
+
+def parse_input(state: GameState, text: str):
     
     match = re.fullmatch(r'\s*([A-Za-z])\s*(\d{1,2})\s*', text)
     
     if match is None:
     
-        raise PenteError("Input de jogada irreconhecível, tente [a-r][1-18].")
+        raise ParseError("Input de jogada irreconhecível, tente [a-s][1-19].")
     
     row, col = int(match.group(2)) - 1, ord(match.group(1).lower()) - ord('a')
 
-    if not in_bounds(row, col):
+    if not in_bounds((row, col)):
 
-        raise PenteError("Jogada fora das coordenadas do tabuleiro.")
+        raise BoardError("Jogada fora das coordenadas do tabuleiro.")
     
-    if board.matrix[row][col] is not None:
+    if state.board.get_at((row, col)) is not None:
 
-        raise PenteError("Posição já ocupada.")
+        raise RuleError("Posição já ocupada.")
+
+    if opening_rule(state.plays, (row, col)):
+
+        raise RuleError("A segunda jogada das Brancas deve estar ao menos a 3 casas de distância do centro.")
     
-    return row, col
+    return Move((row, col), state.agent)
 
-def ask_input(agent: Sides):
+def place_stone(move: Move, board: Board):
 
-    play = str(input(f"{PLAYERS[agent]} jogam, insira [a-r][1-18]: "))
-
-    return play
-
-def apply_move(move: Move, board: Board):
-
-    board.matrix[move.row][move.col] = move.agent
+    board.set_at(move.coord, move.agent)
 
 def captures(move: Move, board: Board) -> int:
 
     captured_pairs = 0
+    row, col = move.coord
 
     for dr, dc in DIRECTIONS:
 
@@ -87,25 +135,28 @@ def captures(move: Move, board: Board) -> int:
 
             step_r, step_c = dr * multiplier, dc * multiplier
 
-            r1, c1 = move.row + step_r * 1, move.col + step_c * 1
-            r2, c2 = move.row + step_r * 2, move.col + step_c * 2
-            r3, c3 = move.row + step_r * 3, move.col + step_c * 3
+            r1, c1 = row + step_r * 1, col + step_c * 1
+            r2, c2 = row + step_r * 2, col + step_c * 2
+            r3, c3 = row + step_r * 3, col + step_c * 3
 
-            if not in_bounds(r3, c3):
+            if not in_bounds((r3, c3)):
 
                 continue
 
-            if (board.matrix[r1][c1] is OPPONENT[move.agent] and
-                board.matrix[r2][c2] is OPPONENT[move.agent] and
-                board.matrix[r3][c3] is move.agent):
+            if (board.get_at((r1, c1)) is OPPONENT[move.agent] and
+                board.get_at((r2, c2)) is OPPONENT[move.agent] and
+                board.get_at((r3, c3)) is move.agent):
 
-                board.matrix[r1][c1] = None
-                board.matrix[r2][c2] = None
+                board.set_at((r1, c1), None)
+                board.set_at((r2, c2), None)
+
                 captured_pairs += 1
 
     return captured_pairs
 
 def check_alignment(move: Move, board: Board) -> bool:
+
+    row, col = move.coord
 
     for dr, dc in DIRECTIONS:
 
@@ -113,9 +164,9 @@ def check_alignment(move: Move, board: Board) -> bool:
 
         for multiplier in (1, -1):
 
-            r, c = move.row + dr * multiplier, move.col + dc * multiplier
+            r, c = row + dr * multiplier, col + dc * multiplier
 
-            while in_bounds(r, c) and board.matrix[r][c] is move.agent:
+            while in_bounds((r, c)) and board.get_at((r, c)) is move.agent:
 
                 count += 1
                 r += dr * multiplier
@@ -127,13 +178,34 @@ def check_alignment(move: Move, board: Board) -> bool:
 
     return False
 
-def check_win(captured_pairs: int, move: Move, board: Board) -> bool:
+def check_win(scores: dict[Sides, int], move: Move, board: Board) -> bool:
 
-    return check_alignment(move, board) or captured_pairs >= 5
+    return check_alignment(move, board) or scores[move.agent] >= 5
 
 def full_board(board: Board) -> bool:
 
     return all(cell is not None for row in board.matrix for cell in row)
+
+def apply_move(state: GameState, move: Move):
+
+    winner = None
+    new_board = state.board.copy()
+    scores = state.scores.copy()
+    agent = state.agent
+    place_stone(move, new_board)
+    captured_pairs = captures(move, new_board)
+    scores[agent] += captured_pairs
+
+    if check_win(scores, move, new_board):
+
+        winner = move.agent
+
+    plays = state.plays
+    plays += 1
+
+    agent = OPPONENT[agent]
+
+    return GameState(new_board, agent, scores, winner, plays)
 
 def render_row(row) -> str:
 
@@ -141,7 +213,7 @@ def render_row(row) -> str:
 
 def format_board(board: Board) -> str:
 
-    header = "   " + " ".join(chr(ord("a") + col) for col in range(SIZE))
+    header = "   " + " ".join(chr(ord("a") + col) for col in range(BOARD_SIZE))
     
     lines = [header]
 
@@ -153,61 +225,49 @@ def format_board(board: Board) -> str:
 
     return "\n".join(lines)
 
-def print_board(board: Board):
+def format_scores(scores: dict[Sides, int]):
 
-    print(format_board(board))
+    printed_scores = []
 
-def play_pente():
+    for side in SIDES:
 
-    board = Board.build_initial_board()
-    agent = random.choice(SIDES)
-    scores = {Sides.BLACK: 0, Sides.WHITE: 0}
-    apply_move(Move(8, 8, agent), board)
-    agent = OPPONENT[agent]
+        printed_scores.append(f"Score das {side.value}: {scores[side]}")
 
-    while True:
+    return "\n".join(printed_scores)
 
-        print(CLEAR, end="")
+class Pente(TwoPlayerGame[GameState, Move]):
 
-        print_board(board)
-        print()
-        print(f"Score das {PLAYERS[Sides.BLACK]}: {scores[Sides.BLACK]}")
-        print(f"Score das {PLAYERS[Sides.WHITE]}: {scores[Sides.WHITE]}")
-        print()
+    name = "Pente"
+    move_format = "[a-s][1-19]"
 
-        try:
+    def initial_state(self) -> GameState:
 
-            play = ask_input(agent)
-            row, col = parse_input(board, play)
-            move = Move(row, col, agent)
-            apply_move(move, board)
-            scores[agent] += captures(move, board)
-            
-        except PenteError as e:
+        return GameState(Board.build_initial_board(), Sides.BLACK, {Sides.WHITE: 0, Sides.BLACK: 0}, None, 1)
 
-            print(e)
-            time.sleep(3)
+    def legal_moves(self, state: GameState) -> Iterator[Move]:
 
-            continue
+        return generate_legal_moves(state)
 
-        if check_win(scores[agent], move, board):
+    def parse_move(self, state: GameState, text: str) -> Move:
 
-            print(CLEAR, end="")
-            print_board(board)
-            print()
-            print(f"O vencedor é o lado das {PLAYERS[agent]}.")
+        return parse_input(state, text)    
 
-            break
+    def apply_move(self, state: GameState, move: Move) -> GameState:
 
-        if full_board(board):
+        return apply_move(state, move)
 
-            print(CLEAR, end="")
-            print_board(board)
-            print()
-            print(f"Tabuleiro cheio sem produzir vencedor. O resultado é um empate.")
+    def is_terminal(self, state: GameState) -> bool:
 
-        agent = OPPONENT[agent]
+        return state.winner is not None or full_board(state.board)
+
+    def winner(self, state: GameState) -> Sides | None:
+
+        return state.winner
+
+    def to_text(self, state: GameState) -> str:
+
+        return format_board(state.board) + "\n\n" + format_scores(state.scores)
 
 if __name__ == "__main__":
 
-    play_pente()
+    play_in_terminal(Pente())

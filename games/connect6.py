@@ -1,8 +1,8 @@
-from dataclasses import dataclass
 import re
 from enum import Enum
 from typing import NamedTuple
 from collections.abc import Iterator
+from dataclasses import dataclass
 from two_player_game import TwoPlayerGame, GameError, play_in_terminal
 
 BOARD_SIZE = 19
@@ -25,10 +25,6 @@ class Sides(Enum):
 
 GLYPHS = {Sides.BLACK: "◯", Sides.WHITE: "●", None: "·"}
 OPPONENT = {Sides.BLACK: Sides.WHITE, Sides.WHITE: Sides.BLACK}
-
-def in_bounds(row, col) -> bool:
-
-    return 0 <= row < BOARD_SIZE and 0 <= col < BOARD_SIZE
 
 @dataclass
 class Board:
@@ -58,6 +54,12 @@ class Board:
         initial_board: list[list[Sides | None]] = [[None for _ in range(BOARD_SIZE)] for _ in range(BOARD_SIZE)]
         
         return cls(initial_board)
+
+def in_bounds(coord: Coord) -> bool:
+
+    row, col = coord
+
+    return 0 <= row < BOARD_SIZE and 0 <= col < BOARD_SIZE
 
 @dataclass
 class GameState:
@@ -92,7 +94,7 @@ def parse_input(state: GameState, text: str) -> Move:
     
     row, col = int(match.group(2)) - 1, ord(match.group(1).upper()) - ord('A')
 
-    if not in_bounds(row, col):
+    if not in_bounds((row, col)):
     
         raise BoardError("Jogada fora das coordenadas do tabuleiro.")
         
@@ -118,7 +120,7 @@ def check_alignment(move: Move, board: Board) -> bool:
 
             r, c = row + dr * multiplier, col + dc * multiplier
 
-            while in_bounds(r, c) and board.matrix[r][c] is move.agent:
+            while in_bounds((r, c)) and board.get_at((r, c)) is move.agent:
 
                 count += 1
                 r += dr * multiplier
