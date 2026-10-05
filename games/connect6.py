@@ -136,7 +136,7 @@ def full_board(plays: int) -> bool:
 
     return plays >= (BOARD_SIZE ** 2)
 
-def apply_move(state: GameState, move: Move):
+def apply_move(state: GameState, move: Move) -> GameState:
 
     winner = None
     new_board = state.board.copy()

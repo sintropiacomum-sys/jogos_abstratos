@@ -73,7 +73,6 @@ class GameState:
     scores: dict[Sides, int]
     winner: Sides | None
     plays: int
-    
 
 class Move (NamedTuple):
 
@@ -186,7 +185,7 @@ def full_board(board: Board) -> bool:
 
     return all(cell is not None for row in board.matrix for cell in row)
 
-def apply_move(state: GameState, move: Move):
+def apply_move(state: GameState, move: Move) -> GameState:
 
     winner = None
     new_board = state.board.copy()

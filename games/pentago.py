@@ -1,19 +1,18 @@
 import re
-import time
-from dataclasses import dataclass
 from enum import Enum, auto
 from typing import NamedTuple
 from collections.abc import Iterator
+from dataclasses import dataclass
+from two_player_game import TwoPlayerGame, GameError, play_in_terminal
 
-CLEAR = "\033[H\033[J"
-SIZE = 6
-BLOCK = 3
-QUAD = 2
+BOARD_SIZE = 6
+BLOCK_SIZE = 3
+QUADS_SIZE = 2
 WINNING_LINE = 5
 DIRECTIONS = ((1, 1), (0, 1), (1, 0), (-1, 1))
 Coord = tuple[int, int]
 
-class PentagoError(Exception): ...
+class PentagoError(GameError): ...
 
 class ParseError(PentagoError): ...
 
@@ -23,8 +22,8 @@ class RuleError(PentagoError): ...
 
 class Sides(Enum):
 
-    BLACK = auto()
-    WHITE = auto()
+    BLACK = "Pretas"
+    WHITE = "Brancas"
 
 class Orientation(Enum):
 
@@ -32,7 +31,6 @@ class Orientation(Enum):
     COUNTERCLOCK = auto()
 
 GLYPHS = {Sides.BLACK: "◯", Sides.WHITE: "●", None: "·"}
-PLAYERS = {Sides.BLACK: "Pretas", Sides.WHITE: "Brancas"}
 OPPONENT = {Sides.BLACK: Sides.WHITE, Sides.WHITE: Sides.BLACK}
 
 @dataclass
@@ -40,10 +38,27 @@ class Board:
 
     matrix: list[list[None | Sides]]
 
+    def get_at(self, coord: Coord) -> Sides | None:
+                
+        r, c = coord
+    
+        return self.matrix[r][c]
+        
+    def set_at(self, coord: Coord, cell: Sides | None):
+    
+        r, c = coord
+        self.matrix[r][c] = cell
+
+    def copy(self) -> "Board":
+    
+        new_matrix = [row.copy() for row in self.matrix]
+
+        return Board(new_matrix)
+
     @classmethod
     def build_initial_board(cls) -> "Board":
 
-        initial_board: list[list[Sides | None]] = [[None for _ in range(SIZE)] for _ in range(SIZE)]
+        initial_board: list[list[Sides | None]] = [[None for _ in range(BOARD_SIZE)] for _ in range(BOARD_SIZE)]
         
         return cls(initial_board)
 
@@ -51,13 +66,13 @@ def in_bounds(cell: Coord) -> bool:
 
     row, col = cell
 
-    return 0 <= row < SIZE and 0 <= col < SIZE
+    return 0 <= row < BOARD_SIZE and 0 <= col < BOARD_SIZE
 
 def valid_quadrant(cell: Coord) -> bool:
 
     row, col = cell
 
-    return 0 <= row < QUAD and 0 <= col < QUAD
+    return 0 <= row < QUADS_SIZE and 0 <= col < QUADS_SIZE
 
 def ray(origin: Coord, step: Coord) -> Iterator[Coord]:
 
@@ -70,29 +85,29 @@ def ray(origin: Coord, step: Coord) -> Iterator[Coord]:
 
         row, col = row + dr, col + dc
 
-def block_of(cell: Coord) -> Coord:
+def which_quadrant(cell: Coord) -> Coord:
 
     row, col = cell
 
-    return (row // BLOCK, col // BLOCK)
+    return (row // BLOCK_SIZE, col // BLOCK_SIZE)
 
-def local_of(cell: Coord) -> Coord:
+def local_coords(cell: Coord) -> Coord:
 
     row, col = cell
 
-    return row % BLOCK, col % BLOCK
+    return row % BLOCK_SIZE, col % BLOCK_SIZE
 
-def global_of(quadrant: Coord, local: Coord) -> Coord:
+def global_coords(quadrant: Coord, local: Coord) -> Coord:
 
-    return quadrant[0] * BLOCK + local[0], quadrant[1] * BLOCK + local[1]
+    return quadrant[0] * BLOCK_SIZE + local[0], quadrant[1] * BLOCK_SIZE + local[1]
 
 def cells_of_block(quadrant: Coord) -> Iterator[Coord]:
 
-    for local_r in range(BLOCK):
+    for local_r in range(BLOCK_SIZE):
 
-        for local_c in range(BLOCK):
+        for local_c in range(BLOCK_SIZE):
 
-            yield global_of(quadrant, (local_r, local_c))
+            yield global_coords(quadrant, (local_r, local_c))
 
 class Move (NamedTuple):
 
@@ -101,15 +116,43 @@ class Move (NamedTuple):
     orientation: Orientation
     agent: Sides
 
-def apply_placement(placement: Coord, agent: Sides, board: Board) -> None:
+@dataclass
+class GameState:
+
+    board: Board
+    agent: Sides
+
+def generate_legal_moves(state: GameState) -> Iterator[Move]:
+
+    for r_placement in range(BOARD_SIZE):
+
+        for c_placement in range(BOARD_SIZE):
+
+            placement = (r_placement, c_placement)
+
+            if state.board.get_at(placement) is not None:
+
+                continue
+
+            for r_quadrant in range(QUADS_SIZE):
+
+                for c_quadrant in range(QUADS_SIZE):
+
+                    quadrant = (r_quadrant, c_quadrant)
+
+                    for orientation in Orientation:
+
+                        yield Move(placement, quadrant, orientation, state.agent)
+
+def place_stone(placement: Coord, agent: Sides, board: Board) -> None:
 
     r, c = placement
-    board.matrix[r][c] = agent
+    board.set_at((r, c), agent)
 
 def rotate_block(board: Board, quadrant: Coord, orientation: Orientation) -> None:
 
     extracted = [board.matrix[r][c] for r, c in cells_of_block(quadrant)]
-    block = [extracted[i : i + BLOCK] for i in range(0, len(extracted), BLOCK)]
+    block = [extracted[i : i + BLOCK_SIZE] for i in range(0, len(extracted), BLOCK_SIZE)]
 
     if orientation == Orientation.CLOCKWISE:
 
@@ -127,9 +170,9 @@ def rotate_block(board: Board, quadrant: Coord, orientation: Orientation) -> Non
 
 def has_alignment(agent: Sides, board: Board) -> bool:
 
-    for r in range(SIZE):
+    for r in range(BOARD_SIZE):
         
-        for c in range(SIZE):
+        for c in range(BOARD_SIZE):
 
             for step in DIRECTIONS:
 
@@ -149,7 +192,19 @@ def has_alignment(agent: Sides, board: Board) -> bool:
 
     return False
 
-def parse_input(board: Board, text: str) -> tuple[Coord, Coord, Orientation]:
+def full_board(board: Board) -> bool:
+
+    return all(cell is not None for row in board.matrix for cell in row)
+
+def apply_move(state: GameState, move: Move) -> GameState:
+
+    new_board = state.board.copy()
+    place_stone(move.placement, move.agent, new_board)
+    rotate_block(new_board, move.quadrant, move.orientation)
+
+    return GameState(new_board, OPPONENT[state.agent])    
+
+def parse_input(state: GameState, text: str) -> Move:
     
     match = re.fullmatch(r'\s*([A-Za-z])\s*(\d)\s*([A-Za-z])\s*(\d)\s*([A-Za-z])\s*([A-Za-z])\s*', text)
     
@@ -164,7 +219,7 @@ def parse_input(board: Board, text: str) -> tuple[Coord, Coord, Orientation]:
     
         raise BoardError(f"A dupla de coordenadas ({r + 1}, {c + 1}) não existe no tabuleiro.")
     
-    if board.matrix[r][c] is not None:
+    if state.board.get_at(placement) is not None:
             
         raise RuleError(f"A casa nas coordenadas ({r + 1}, {c + 1}) já está ocupada.")
 
@@ -172,7 +227,7 @@ def parse_input(board: Board, text: str) -> tuple[Coord, Coord, Orientation]:
 
     if not valid_quadrant(quadrant):
             
-        raise BoardError("Quadrante inválido, temos linha A e linha B + coluna 1 e coluna 2.")
+        raise BoardError("Quadrante inválido, temos linha A ou linha B + coluna 1 ou coluna 2.")
 
     if (match.group(5).upper() + match.group(6).upper()) == "SH":
 
@@ -186,26 +241,20 @@ def parse_input(board: Board, text: str) -> tuple[Coord, Coord, Orientation]:
     
         raise ParseError(f"Orientação de giro inválida, tente SH (sentido horário) ou AH (anti-horário) no final.")
     
-    return (placement, quadrant, orientation)
-
-def ask_input(agent: Sides):
-
-    jogada = str(input(f"{PLAYERS[agent]} jogam, insira [a-f][1-6] [A-B][1-2] [SH]/[AH]: "))
-
-    return jogada
+    return Move(placement, quadrant, orientation, state.agent)
 
 def render_row(row) -> str:
 
-    left = " ".join(GLYPHS[cell] for cell in row[:BLOCK])
-    right = " ".join(GLYPHS[cell] for cell in row[BLOCK:])
+    left = " ".join(GLYPHS[cell] for cell in row[:BLOCK_SIZE])
+    right = " ".join(GLYPHS[cell] for cell in row[BLOCK_SIZE:])
 
     return f"{left} | {right}"
 
 def render_header() -> str:
 
-    letters = [chr(ord("a") + col) for col in range(SIZE)]
-    left = " ".join(letters[:BLOCK])
-    right = " ".join(letters[BLOCK:])
+    letters = [chr(ord("a") + col) for col in range(BOARD_SIZE)]
+    left = " ".join(letters[:BLOCK_SIZE])
+    right = " ".join(letters[BLOCK_SIZE:])
 
     return f"   {left} | {right}"
 
@@ -215,7 +264,7 @@ def format_board(board: Board) -> str:
 
     for row_idx, row in enumerate(board.matrix, start=1):
 
-        if row_idx == BLOCK + 1:
+        if row_idx == BLOCK_SIZE + 1:
 
             lines.append("   " + "-" * 13)
 
@@ -223,90 +272,52 @@ def format_board(board: Board) -> str:
 
     return "\n".join(lines)
 
-def print_board(board: Board):
+class Pentago(TwoPlayerGame[GameState, Move]):
 
-    print(format_board(board))
+    name = "Pentago"
+    move_format = "[a-f][1-6] [A-B][1-2] [SH]/[AH]"
 
-def play_pentago():
+    def initial_state(self) -> GameState:
 
-    board = Board.build_initial_board()
-    agent = Sides.WHITE
+        return GameState(Board.build_initial_board(), Sides.WHITE)
 
-    while True:
+    def legal_moves(self, state: GameState) -> Iterator[Move]:
 
-        print(CLEAR, end="")
-        print_board(board)
-        print()
+        return generate_legal_moves(state)
 
-        try:
-        
-            play = ask_input(agent)
-            placement, quadrant, orientation = parse_input(board, play)
+    def parse_move(self, state: GameState, text: str) -> Move:
 
-        except PentagoError as e:
-        
-            print(e)
-            time.sleep(2)
-        
-            continue
+        return parse_input(state, text)    
 
-        apply_placement(placement, agent, board)
-        print(CLEAR, end="")
-        print_board(board)
-        time.sleep(3)
+    def apply_move(self, state: GameState, move: Move) -> GameState:
 
-        if has_alignment(agent, board):
+        return apply_move(state, move)
 
-            print(CLEAR, end="")
-            print_board(board)
-            print()
-            print(f"O vencedor é o lado das {PLAYERS[agent]}.")
-            
-            break
+    def is_terminal(self, state: GameState) -> bool:
 
-        rotate_block(board, quadrant, orientation)
+        return has_alignment(Sides.WHITE, state.board) or has_alignment(Sides.BLACK, state.board) or full_board(state.board)
 
-        black = has_alignment(Sides.BLACK, board)
-        white = has_alignment(Sides.WHITE, board)
+    def winner(self, state: GameState) -> Sides | None:
 
-        if black and white:
+        white = has_alignment(Sides.WHITE, state.board)
+        black = has_alignment(Sides.BLACK, state.board)
 
-            print(CLEAR, end="")
-            print_board(board)
-            print()
-            print(f"Dois alinhamentos simultâneos. O resultado é um empate.")
+        if white and not black:
 
-            break
+            return Sides.WHITE
 
-        elif black:
-        
-            print(CLEAR, end="")
-            print_board(board)
-            print()
-            print(f"O vencedor é o lado das {PLAYERS[Sides.BLACK]}.")
+        elif black and not white:
 
-            break
+            return Sides.BLACK
 
-        elif white:
-                    
-            print(CLEAR, end="")
-            print_board(board)
-            print()
-            print(f"O vencedor é o lado das {PLAYERS[Sides.WHITE]}.")
+        else:
 
-            break
+            return None
 
-        elif all(cell is not None for row in board.matrix for cell in row):
+    def to_text(self, state: GameState) -> str:
 
-            print(CLEAR, end="")
-            print_board(board)
-            print()
-            print(f"O board foi preenchido e girado sem produzir vencedor. O resultado é um empate.")
-
-            break
-
-        agent = OPPONENT[agent]
+        return format_board(state.board)
 
 if __name__ == "__main__":
 
-    play_pentago()
+    play_in_terminal(Pentago())
