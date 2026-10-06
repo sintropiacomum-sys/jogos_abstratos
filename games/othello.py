@@ -1,54 +1,52 @@
 import re
-import time
-from dataclasses import dataclass
-from enum import Enum, auto
+from enum import Enum
 from typing import NamedTuple
 from collections.abc import Iterator
+from dataclasses import dataclass
+from two_player_game import TwoPlayerGame, GameError, play_in_terminal
 
-CLEAR = "\033[H\033[J"
 SIZE = 8
 DIRECTIONS = tuple((dr, dc) for dr in (-1, 0, 1) for dc in (-1, 0, 1) if (dr, dc) != (0, 0))
-Cell = tuple[int, int]
+Coord = tuple[int, int]
 
-class OthelloError(Exception):
+class OthelloError(GameError): ...
 
-    ...
+class ParseError(OthelloError): ...
 
-class ParseError(OthelloError):
+class BoardError(OthelloError): ...
 
-    ...
-
-class BoardError(OthelloError):
-
-    ...
-
-class Overlap(OthelloError):
-
-    ...
-
-class RuleError(OthelloError):
-
-    ...
+class RuleError(OthelloError): ...
 
 class Sides(Enum):
 
-    BLACK = auto()
-    WHITE = auto()
+    BLACK = "Pretas"
+    WHITE = "Brancas"
 
+SIDES = [Sides.BLACK, Sides.WHITE]
 GLYPHS = {Sides.BLACK: "◯", Sides.WHITE: "●", None: "·"}
-PLAYERS = {Sides.BLACK: "Pretas", Sides.WHITE: "Brancas"}
 OPPONENT = {Sides.BLACK: Sides.WHITE, Sides.WHITE: Sides.BLACK}
-
-def in_bounds(cell: Cell) -> bool:
-
-    row, col = cell
-
-    return 0 <= row < SIZE and 0 <= col < SIZE
 
 @dataclass
 class Board:
 
     matrix: list[list[None | Sides]]
+
+    def get_at(self, coord: Coord) -> Sides | None:
+                
+        r, c = coord
+    
+        return self.matrix[r][c]
+        
+    def set_at(self, coord: Coord, cell: Sides | None):
+    
+        r, c = coord
+        self.matrix[r][c] = cell
+
+    def copy(self) -> "Board":
+    
+        new_matrix = [row.copy() for row in self.matrix]
+
+        return Board(new_matrix)
 
     @classmethod
     def build_initial_board(cls) -> "Board":
@@ -59,16 +57,16 @@ class Board:
         
         return cls(initial_board)
 
-class Move (NamedTuple):
+def in_bounds(coord: Coord) -> bool:
 
-    origin: Cell
-    agent: Sides
+    row, col = coord
 
-def ray(origin: Cell, step: Cell) -> Iterator[Cell]:
+    return 0 <= row < SIZE and 0 <= col < SIZE
+
+def ray(origin: Coord, step: Coord) -> Iterator[Coord]:
 
     row, col = origin
     dr, dc = step
-
     row, col = row + dr, col + dc
 
     while in_bounds((row, col)):
@@ -77,17 +75,19 @@ def ray(origin: Cell, step: Cell) -> Iterator[Cell]:
 
         row, col = row + dr, col + dc
 
-def is_legal(move: Move, board: Board) -> bool:
+@dataclass
+class GameState:
 
-    if not in_bounds(move.origin):
+    board: Board
+    agent: Sides
+    passed: Sides | None
 
-        return False
-        
-    r, c = move.origin
+class Move (NamedTuple):
 
-    return board.matrix[r][c] is None and bool(flips(move, board))
+    origin: Coord
+    agent: Sides
 
-def flips(move: Move, board: Board) -> tuple[Cell, ...]:
+def flips(move: Move, board: Board) -> tuple[Coord, ...]:
 
     opponent = OPPONENT[move.agent]
     flipped = []
@@ -116,7 +116,17 @@ def flips(move: Move, board: Board) -> tuple[Cell, ...]:
                 
     return tuple(flipped)
 
-def legal_moves(agent: Sides, board: Board) -> Iterator[Move]:
+def is_legal(move: Move, board: Board) -> bool:
+
+    if not in_bounds(move.origin):
+
+        return False
+        
+    r, c = move.origin
+
+    return board.matrix[r][c] is None and bool(flips(move, board))
+
+def generate_legal_moves(agent: Sides, board: Board) -> Iterator[Move]:
 
     for r in range(SIZE):
 
@@ -128,33 +138,60 @@ def legal_moves(agent: Sides, board: Board) -> Iterator[Move]:
 
                 yield move
 
-def apply_move(move: Move, board: Board) -> None:
-
-    r, c = move.origin
+def parse_input(state: GameState, text: str) -> Move:
+    
+    match = re.fullmatch(r'\s*([A-Za-z])\s*(\d)\s*', text)
+    
+    if match is None:
+    
+        raise ParseError("Input de jogada irreconhecível, tente [a-h][1-8].")
+    
+    r, c = int(match.group(2)) - 1, ord(match.group(1).upper()) - ord('A')
 
     if not in_bounds((r, c)):
-
+    
         raise BoardError(f"A dupla de coordenadas ({r + 1}, {c + 1}) não existe no tabuleiro.")
 
-    if board.matrix[r][c] is not None:
+    if state.board.get_at((r, c)) is not None:
         
-        raise Overlap(f"A casa nas coordenadas ({r + 1}, {c + 1}) já está ocupada.")
+        raise RuleError(f"A casa nas coordenadas ({r + 1}, {c + 1}) já está ocupada.")
 
-    flipped_pieces = flips(move, board)
+    move = Move((r, c), state.agent)
 
-    if not flipped_pieces:
+    if not flips(move, state.board):
 
         raise RuleError(f"A jogada em ({r + 1}, {c + 1}) não flanqueia peças adversárias.")
-
-    board.matrix[r][c] = move.agent
-
-    for f_r, f_c in flipped_pieces:
-
-        board.matrix[f_r][f_c] = move.agent
+    
+    return move
 
 def has_legal_moves(agent: Sides, board: Board) -> bool:
 
-    return any(True for _ in legal_moves(agent, board))
+    return any(True for _ in generate_legal_moves(agent, board))
+
+def apply_move(state: GameState, move: Move) -> GameState:
+
+    new_board = state.board.copy()
+    agent = move.agent
+    r, c = move.origin
+    passed = None
+
+    new_board.set_at((r, c), agent)
+    flipped_pieces = flips(move, new_board)
+
+    for f_r, f_c in flipped_pieces:
+
+        new_board.set_at((f_r, f_c), agent)
+
+    if has_legal_moves(OPPONENT[agent], new_board):
+
+        agent = OPPONENT[agent]
+        passed = None
+
+    elif has_legal_moves(agent, new_board):
+
+        passed = OPPONENT[agent]
+
+    return GameState(new_board, agent, passed)
 
 def game_over(board: Board) -> bool:
 
@@ -194,25 +231,8 @@ def game_result(board: Board) -> Sides | None:
 
         return None
 
-def parse_input(text: str) -> Cell:
-    
-    match = re.fullmatch(r'\s*([A-Za-z])\s*(\d)\s*', text)
-    
-    if match is None:
-    
-        raise ParseError("Input de jogada irreconhecível, tente [a-h][1-8].")
-    
-    row, col = int(match.group(2)) - 1, ord(match.group(1).upper()) - ord('A')
-    
-    return row, col
-
-def ask_input(agent: Sides) -> str:
-
-    jogada = str(input(f"{PLAYERS[agent]} jogam, insira [a-h][1-8]: "))
-
-    return jogada
-
 def render_row(row) -> str:
+
     return " ".join(GLYPHS[col] for col in row)
 
 def format_board(board: Board) -> str:
@@ -229,75 +249,57 @@ def format_board(board: Board) -> str:
 
     return "\n".join(lines)
 
-def print_board(board: Board):
+def format_scores(scores: dict[Sides, int]):
 
-    print(format_board(board))
+    printed_scores = []
 
-def play_othello():
+    for side in SIDES:
 
-    board = Board.build_initial_board()
-    agent = Sides.BLACK
+        printed_scores.append(f"Score das {side.value}: {scores[side]}")
 
-    while True:
+    return "\n".join(printed_scores)
 
-        print(CLEAR, end="")
-        print_board(board)
-        print()
+class Othello(TwoPlayerGame[GameState, Move]):
 
-        scores = count_scores(board)
+    name = "Othello"
+    move_format = "[a-h][1-8]"
 
-        print(f"Score das {PLAYERS[Sides.BLACK]}: {scores[Sides.BLACK]}")
-        print(f"Score das {PLAYERS[Sides.WHITE]}: {scores[Sides.WHITE]}")
-        print()
+    def initial_state(self) -> GameState:
 
-        if has_legal_moves(agent, board):
+        return GameState(Board.build_initial_board(), Sides.BLACK, None)
 
-            try:
-            
-                play = ask_input(agent)
-                row, col = parse_input(play)
-                move = Move((row, col), agent)
-                apply_move(move, board)
-                scores = count_scores(board)
+    def legal_moves(self, state: GameState) -> Iterator[Move]:
 
-            except OthelloError as e:
-            
-                print(e)
-                time.sleep(3)
-            
-                continue
+        return generate_legal_moves(state.agent, state.board)
 
-        elif game_over(board):
+    def parse_move(self, state: GameState, text: str) -> Move:
 
-            winner = game_result(board)
+        return parse_input(state, text)    
 
-            if winner is Sides.BLACK or winner is Sides.WHITE:
+    def apply_move(self, state: GameState, move: Move) -> GameState:
 
-                print(CLEAR, end="")
-                print_board(board)
-                print()
-                print(f"O vencedor é o lado das {PLAYERS[winner]} por {scores[winner] - scores[OPPONENT[winner]]} pontos.")
-                
-                break
+        return apply_move(state, move)
 
-            else:
+    def is_terminal(self, state: GameState) -> bool:
 
-                print(CLEAR, end="")
-                print_board(board)
-                print()
-                print(f"O resultado é um empate.")
+        return game_over(state.board)
 
-                break
+    def winner(self, state: GameState) -> Sides | None:
+
+        return game_result(state.board)
+
+    def to_text(self, state: GameState) -> str:
+
+        text = format_board(state.board) + "\n\n" + format_scores(count_scores(state.board))
+
+        if state.passed is not None:
+             
+            return text + "\n\n" + f"Sem jogadas, as {state.passed.value} passaram."
 
         else:
 
-            print(CLEAR, end="")
-            print_board(board)
-            print()
-            print(f"As {PLAYERS[agent]} não têm jogadas, a vez será passada para as {PLAYERS[OPPONENT[agent]]}.")
-
-        agent = OPPONENT[agent]
+            return text
 
 if __name__ == "__main__":
 
-    play_othello()
+    play_in_terminal(Othello())
